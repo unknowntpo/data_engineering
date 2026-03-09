@@ -1,0 +1,5 @@
+catalog:
+  default:
+    type: sql
+    uri: sqlite:///warehouse/iceberg_catalog.db
+    warehouse: file:///Users/unknowntpo/repo/unknowntpo/data_engineering/iceberg/nyc_taxi/warehouse
