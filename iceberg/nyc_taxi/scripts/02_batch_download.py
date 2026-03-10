@@ -1,5 +1,6 @@
 """Phase 2: Batch download NYC Taxi Parquet files with Polars processing."""
 import argparse
+import tempfile
 from pathlib import Path
 
 import polars as pl
@@ -8,6 +9,7 @@ from tqdm import tqdm
 
 BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
+PROCESSED_DIR = Path(__file__).parent.parent / "data" / "processed"
 
 
 def download_month(year: int, month: int) -> Path:
@@ -31,8 +33,8 @@ def download_month(year: int, month: int) -> Path:
     return out_path
 
 
-def process(path: Path) -> Path:
-    df = pl.read_parquet(path)
+def process(raw_path: Path) -> Path:
+    df = pl.read_parquet(raw_path)
 
     df = df.with_columns([
         pl.col("tpep_pickup_datetime").cast(pl.Datetime),
@@ -44,9 +46,12 @@ def process(path: Path) -> Path:
     ])
     df = df.filter(pl.col("trip_distance") > 0)
 
-    df.write_parquet(path, compression="snappy")
-    print(f"  Processed → {path}  shape={df.shape}")
-    return path
+    # write to processed dir, never touch raw
+    out_path = PROCESSED_DIR / raw_path.relative_to(DATA_DIR)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(out_path, compression="snappy")
+    print(f"  Processed → {out_path}  shape={df.shape}")
+    return out_path
 
 
 def main():

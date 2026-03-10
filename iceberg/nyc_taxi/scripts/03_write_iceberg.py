@@ -12,7 +12,7 @@ from pyiceberg.types import (
 from pyiceberg.partitioning import PartitionSpec, PartitionField
 from pyiceberg.transforms import YearTransform, MonthTransform
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "raw"
+DATA_DIR = Path(__file__).parent.parent / "data" / "processed"
 CATALOG_NAME = "default"
 NAMESPACE = "nyc_taxi"
 TABLE_NAME = "yellow_tripdata"
