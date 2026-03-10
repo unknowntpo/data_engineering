@@ -29,6 +29,19 @@ iceberg_parquet/                  ← project root
 
 ---
 
+## Progress
+
+| Phase | Status |
+|-------|--------|
+| Phase 0 – 環境建置 | ✅ Done |
+| Phase 1 – 直接讀取雲端 Parquet | ✅ Done |
+| Phase 2 – 分批下載與初步處理 | ✅ Done |
+| Phase 3 – 建立與寫入 Iceberg Table | ✅ Done |
+| Phase 4 – Airflow 自動化增量管線 | ⬜ Todo |
+| Phase 5 – 進階與驗證 | ⬜ Todo |
+
+---
+
 ## 階段性任務分解
 
 ### Phase 0 – 環境建置
