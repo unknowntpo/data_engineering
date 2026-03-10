@@ -1,10 +1,13 @@
 """Phase 3: Write processed Parquet files into an Iceberg table."""
 import argparse
+import warnings
 from pathlib import Path
 
+import datetime
 import pyarrow as pa
 import polars as pl
 from pyiceberg.catalog import load_catalog
+from pyiceberg.expressions import And, GreaterThanOrEqual, LessThan
 from pyiceberg.schema import Schema
 from pyiceberg.types import (
     NestedField, TimestampType, DoubleType, LongType, IntegerType, StringType, FloatType,
@@ -12,7 +15,8 @@ from pyiceberg.types import (
 from pyiceberg.partitioning import PartitionSpec, PartitionField
 from pyiceberg.transforms import YearTransform, MonthTransform
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "processed"
+PROJECT_DIR = Path(__file__).parent.parent
+DATA_DIR = PROJECT_DIR / "data" / "processed"
 CATALOG_NAME = "default"
 NAMESPACE = "nyc_taxi"
 TABLE_NAME = "yellow_tripdata"
@@ -69,7 +73,7 @@ def get_or_create_table(catalog):
     return table
 
 
-def append_parquet(table, path: Path):
+def overwrite_partition(table, path: Path, force: bool = False):
     df = pl.read_parquet(path)
 
     # Cast to match schema
@@ -85,9 +89,36 @@ def append_parquet(table, path: Path):
     existing = [c for c in schema_cols if c in df.columns]
     df = df.select(existing)
 
+    # Derive year/month from path (e.g. data/processed/year=2024/month=01/data.parquet)
+    year  = int(path.parts[-3].split("=")[1])
+    month = int(path.parts[-2].split("=")[1])
+
+    start = datetime.datetime(year, month, 1)
+    end   = datetime.datetime(year + (month // 12), (month % 12) + 1, 1)
+
+    overwrite_filter = And(
+        GreaterThanOrEqual("tpep_pickup_datetime", start.isoformat()),
+        LessThan("tpep_pickup_datetime", end.isoformat()),
+    )
+
+    # Check if partition already has data
+    existing_files = list(table.scan(row_filter=overwrite_filter).plan_files())
+    if existing_files and not force:
+        print(f"  Skipping (partition already exists, use --overwrite to replace): year={year} month={month:02d}")
+        return
+
+    # Restrict to rows within the partition month (guards against stray timestamps)
+    df = df.filter(
+        (pl.col("tpep_pickup_datetime") >= start) &
+        (pl.col("tpep_pickup_datetime") < end)
+    )
+
     arrow_table = df.to_arrow()
-    table.append(arrow_table)
-    print(f"  Appended {len(df):,} rows from {path}")
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Delete operation did not match any records")
+        table.overwrite(arrow_table, overwrite_filter=overwrite_filter)
+    print(f"  Overwritten {len(df):,} rows from {path}")
 
 
 def main():
@@ -95,9 +126,19 @@ def main():
     parser.add_argument("--year", type=int, default=2024)
     parser.add_argument("--month", type=int, default=None,
                         help="Single month. Omit for all available.")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Overwrite existing partitions. Without this, existing partitions are skipped.")
     args = parser.parse_args()
 
-    catalog = load_catalog(CATALOG_NAME)
+    warehouse_dir = PROJECT_DIR / "warehouse"
+    catalog = load_catalog(
+        CATALOG_NAME,
+        **{
+            "type": "sql",
+            "uri": f"sqlite:///{warehouse_dir}/iceberg_catalog.db",
+            "warehouse": f"file://{warehouse_dir}",
+        },
+    )
     table = get_or_create_table(catalog)
 
     if args.month:
@@ -113,8 +154,8 @@ def main():
         if not path.exists():
             print(f"  Skipping (not found): {path}")
             continue
-        print(f"\n=== Appending {path} ===")
-        append_parquet(table, path)
+        print(f"\n=== Processing {path} ===")
+        overwrite_partition(table, path, force=args.overwrite)
 
     print("\n--- Verification via DuckDB ---")
     import duckdb
